@@ -54,6 +54,19 @@ func decodeBencode(bencodedString string) (interface{}, error) {
 
 		return res, nil;
 
+	} else if rune(bencodedString[0]) == 'd' && rune(bencodedString[len(bencodedString)-1]) == 'e' {
+
+		if bencodedString == "de" {
+			return map[string]interface{}{}, nil;
+		}
+
+		res, _, err := decodeDictionary(bencodedString, 1);
+		if err != nil {
+			return "", err;
+		}
+
+		return res, nil;
+
 	} else {
 		return "", fmt.Errorf("only strings are supported at the moment")
 	}
@@ -108,22 +121,22 @@ func decodeList(bencodedString string, pointer int) (interface{}, int, error) {
 	
 	var resSlice []interface{}
 
-    for pointer < len(bencodedString)-1 {
+    for pointer < len(bencodedString) - 1 {
         var end int
         var err error
         var res interface{}
 
         switch {
-        case unicode.IsDigit(rune(bencodedString[pointer])):
-            res, end, err = decodeString(bencodedString, pointer)
-        case bencodedString[pointer] == 'i':
-            res, end, err = decodeInt(bencodedString, pointer)
-        case bencodedString[pointer] == 'l':
-            res, end, err = decodeList(bencodedString, pointer+1)
-        case bencodedString[pointer] == 'e':
-            return resSlice, pointer + 1, nil
-        default:
-            return nil, -1, fmt.Errorf("invalid bencoded string")
+			case unicode.IsDigit(rune(bencodedString[pointer])):
+				res, end, err = decodeString(bencodedString, pointer)
+			case bencodedString[pointer] == 'i':
+				res, end, err = decodeInt(bencodedString, pointer)
+			case bencodedString[pointer] == 'l':
+				res, end, err = decodeList(bencodedString, pointer+1)
+			case bencodedString[pointer] == 'e':
+				return resSlice, pointer + 1, nil
+			default:
+				return nil, -1, fmt.Errorf("invalid bencoded string")
         }
 
         if err != nil {
@@ -135,4 +148,64 @@ func decodeList(bencodedString string, pointer int) (interface{}, int, error) {
     }
 
     return resSlice, pointer, nil
+}
+
+func decodeDictionary(bencodedString string, pointer int) (interface{}, int, error) {
+
+	var resMap map[string]interface{} = make(map[string]interface{});
+
+	// if odd means store the result as key and if even then store the result as value for the last key 
+	count := 1;
+
+	var key interface{};
+	var value interface{};
+
+	for pointer < len(bencodedString) - 1 {
+		var end int;
+		var err error;
+
+		switch {
+			case unicode.IsDigit(rune(bencodedString[pointer])):
+				if count % 2 != 0 {
+					key, end, err = decodeString(bencodedString, pointer);
+				} else {
+					value, end, err = decodeString(bencodedString, pointer);
+				}
+			case bencodedString[pointer] == 'i':
+				if count % 2 != 0 {
+					key, end, err = decodeInt(bencodedString, pointer);
+				} else {
+					value, end, err = decodeInt(bencodedString, pointer);
+				}
+			case bencodedString[pointer] == 'l':
+				if count % 2 != 0 {
+					key, end, err = decodeList(bencodedString, pointer+1);
+				} else {
+					value, end, err = decodeList(bencodedString, pointer+1);
+				}
+			case bencodedString[pointer] == 'd':
+				if count % 2 != 0 {
+					key, end, err = decodeDictionary(bencodedString, pointer+1);
+				} else {
+					value, end, err = decodeDictionary(bencodedString, pointer+1);
+				}
+			case bencodedString[pointer] == 'e':
+				return resMap, pointer + 1, nil;
+			default:
+				return nil, -1, fmt.Errorf("invalid bencoded string");
+		}
+
+		if err != nil {
+			return nil, -1, err;
+		}
+
+		if count % 2 == 0 {
+			resMap[key.(string)] = value;
+		}
+		count++;
+		pointer = end;
+
+	}
+
+	return resMap, pointer, nil;
 }
