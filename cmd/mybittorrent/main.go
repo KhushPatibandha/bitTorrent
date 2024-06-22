@@ -32,12 +32,17 @@ func main() {
 			return;
 		}
 
-		// jsonOutput, _ := json.Marshal(string(content));
-		// fmt.Println(string(jsonOutput));
-
 		fmt.Println("Tracker URL:", torrentfileparser.GetTrackerURL(string(content)));
 		fmt.Println("Length:", torrentfileparser.GetLength(string(content)));
 		fmt.Println("Info Hash:", torrentfileparser.GetInfoHash(string(content)));
+		fmt.Println("Piece Length:", torrentfileparser.GetPieceLength(string(content)));
+		fmt.Println("Pieces Hash:");
+
+		piecesHash := torrentfileparser.GetPiecesHash(string(content));
+		
+		for i := 0; i < len(piecesHash); i++ {
+			fmt.Println(piecesHash[i]);
+		}
 		
 	} else {
 		fmt.Println("Unknown command: " + command)

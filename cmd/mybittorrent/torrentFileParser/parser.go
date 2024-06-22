@@ -35,6 +35,26 @@ func GetInfoHash(content string) string {
 	return fmt.Sprintf("%x", hashRes);
 }
 
+func GetPieceLength(content string) interface{} {
+	decode := decode(content);
+	return decode.(map[string]interface{})["info"].(map[string]interface{})["piece length"];
+}
+
+func GetPiecesHash(content string) []string {
+    decode := decode(content)
+    pieces := decode.(map[string]interface{})["info"].(map[string]interface{})["pieces"].(string)
+
+    hashSlice := make([]string, 0, len(pieces)/20)
+
+    for i := 0; i < len(pieces); i += 20 {
+        pieceHash := pieces[i : i+20]
+        hexRepresentation := fmt.Sprintf("%x", pieceHash)
+        hashSlice = append(hashSlice, hexRepresentation)
+    }
+
+    return hashSlice
+}
+
 func decode(content string) interface{} {
 	decoded, err := decodebencode.DecodeBencode(content);
 	if err != nil {
