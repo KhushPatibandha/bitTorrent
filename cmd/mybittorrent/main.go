@@ -6,6 +6,7 @@ import (
 	"os"
 
 	decodebencode "github.com/codecrafters-io/bittorrent-starter-go/cmd/mybittorrent/decodeBencode"
+	torrentfileparser "github.com/codecrafters-io/bittorrent-starter-go/cmd/mybittorrent/torrentFileParser"
 )
 
 func main() {
@@ -25,21 +26,19 @@ func main() {
 	} else if command == "info" {
 		fileName := os.Args[2];
 
-		contents, err := os.ReadFile(fileName);
+		content, err := os.ReadFile(fileName);
 		if err != nil {
 			fmt.Println(err);
 			return;
 		}
 
-		decoded, err := decodebencode.DecodeBencode(string(contents));
-		if err != nil {
-			fmt.Println(err);
-			return;
-		}
+		// jsonOutput, _ := json.Marshal(string(content));
+		// fmt.Println(string(jsonOutput));
 
-		fmt.Println("Tracker URL:", decoded.(map[string]interface{})["announce"]);
-		fmt.Println("Length:", decoded.(map[string]interface{})["info"].(map[string]interface{})["length"]);
-
+		fmt.Println("Tracker URL:", torrentfileparser.GetTrackerURL(string(content)));
+		fmt.Println("Length:", torrentfileparser.GetLength(string(content)));
+		fmt.Println("Info Hash:", torrentfileparser.GetInfoHash(string(content)));
+		
 	} else {
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
