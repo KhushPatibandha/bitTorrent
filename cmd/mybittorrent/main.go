@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -117,6 +118,53 @@ func main() {
 		
 			fmt.Printf("%s:%d\n", ip, port)
 		}
+
+	} else if command == "handshake" {
+		fileName := os.Args[2];
+		hostWithPort := os.Args[3];
+
+		content, err := os.ReadFile(fileName);
+		if err != nil {
+			fmt.Println(err);
+			return;
+		}
+
+		conn, err := net.Dial("tcp", hostWithPort);
+		if err != nil {
+			fmt.Println("Error connecting to peer:", err)
+			return
+		}
+		defer conn.Close();
+
+		infoHash := torrentfileparser.GetInfoHash(string(content));
+
+		protocol := "BitTorrent protocol";
+		protocolLength := byte(len(protocol));
+		reservedBytes := make([]byte, 8);
+		infoHashBytes, _ := hex.DecodeString(infoHash);
+		peerId := []byte("00112233445566778899");
+
+		handshake := append([]byte{protocolLength}, protocol...);
+		handshake = append(handshake, reservedBytes...);
+		handshake = append(handshake, infoHashBytes...);
+		handshake = append(handshake, peerId...);
+
+
+		_, err = conn.Write(handshake);
+		if err != nil {
+			fmt.Println("Error sending handshake:", err)
+			return
+		}
+
+		responseBuffer := make([]byte, 68);
+		_, err = conn.Read(responseBuffer);
+		if err != nil {
+			fmt.Println("Error reading handshake response:", err)
+			return
+		}
+
+		receivedPeerID := responseBuffer[48:]
+		fmt.Printf("Peer ID: %s\n", hex.EncodeToString(receivedPeerID))
 
 	} else {
 		fmt.Println("Unknown command: " + command)
