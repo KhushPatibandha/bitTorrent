@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha1"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"sync"
 
 	decodebencode "github.com/codecrafters-io/bittorrent-starter-go/cmd/mybittorrent/decodeBencode"
 	torrentfileparser "github.com/codecrafters-io/bittorrent-starter-go/cmd/mybittorrent/torrentFileParser"
@@ -173,10 +175,155 @@ func main() {
 		}
 
 		fmt.Println("Piece", pieceNumber, "downloaded to", outputPath)
-	} else {
-		fmt.Println("Unknown command: " + command)
-		os.Exit(1)
-	}
+	} else if command == "download" {
+        fileName := os.Args[4]
+        outputPath := os.Args[3]
+
+        content, err := os.ReadFile(fileName)
+        if err != nil {
+            fmt.Println(err)
+            return
+        }
+
+        pieceLength := torrentfileparser.GetPieceLength(string(content)).(int)
+        totalLength := torrentfileparser.GetLength(string(content)).(int)
+        piecesHash := torrentfileparser.GetPiecesHash(string(content))
+        numPieces := len(piecesHash)
+
+        buffer := make([][]byte, numPieces)
+        workQueue := make(chan int, numPieces)
+        var wg sync.WaitGroup
+        peers := getPeers(fileName)
+
+        for i := 0; i < numPieces; i++ {
+            workQueue <- i
+        }
+        close(workQueue)
+
+        for i := 0; i < len(peers); i++ {
+            wg.Add(1)
+            go func(peer string) {
+                defer wg.Done()
+                for pieceIndex := range workQueue {
+                    pieceSize := pieceLength
+                    if pieceIndex == numPieces-1 {
+                        remaining := totalLength % pieceLength
+                        if remaining > 0 {
+                            pieceSize = remaining
+                        }
+                    }
+                    pieceData, err := downloadPiece(peer, fileName, pieceIndex, pieceSize)
+                    if err != nil {
+                        workQueue <- pieceIndex
+                        continue
+                    }
+                    if verifyPiece(pieceData, piecesHash[pieceIndex]) {
+                        buffer[pieceIndex] = pieceData
+                    } else {
+                        workQueue <- pieceIndex
+                    }
+                }
+            }(peers[i])
+        }
+
+        wg.Wait()
+
+        file, err := os.Create(outputPath)
+        if err != nil {
+            fmt.Println("Error creating output file:", err)
+            return
+        }
+        defer file.Close()
+
+        for _, piece := range buffer {
+            _, err := file.Write(piece)
+            if err != nil {
+                fmt.Println("Error writing to output file:", err)
+                return
+            }
+        }
+
+        fmt.Println("Downloaded", fileName, "to", outputPath)
+    } else {
+        fmt.Println("Unknown command: " + command)
+        os.Exit(1)
+    }
+}
+
+func verifyPiece(pieceData []byte, expectedHash string) bool {
+    actualHash := sha1.Sum(pieceData)
+    return hex.EncodeToString(actualHash[:]) == expectedHash
+}
+
+func downloadPiece(peer string, fileName string, pieceIndex int, pieceSize int) ([]byte, error) {
+    _, conn := doHandshake(fileName, peer)
+    defer conn.Close()
+
+    bitfieldBuffer := make([]byte, 2048)
+    _, err := conn.Read(bitfieldBuffer)
+    if err != nil {
+        return nil, fmt.Errorf("error reading bitfield: %v", err)
+    }
+    bitfieldMessageId := bitfieldBuffer[4]
+    if bitfieldMessageId != 5 {
+        return nil, fmt.Errorf("expected bitfield message ID 5, but got: %d", bitfieldMessageId)
+    }
+
+    interestedMessageId := byte(2)
+    _, err = conn.Write([]byte{0, 0, 0, 1, interestedMessageId})
+    if err != nil {
+        return nil, fmt.Errorf("error sending interested message: %v", err)
+    }
+
+    unChokeBuffer := make([]byte, 5)
+    _, err = conn.Read(unChokeBuffer)
+    if err != nil {
+        return nil, fmt.Errorf("error reading unchoke message: %v", err)
+    }
+    unchokeMessageId := unChokeBuffer[4]
+    if unchokeMessageId != 1 {
+        return nil, fmt.Errorf("expected unchoke message ID 1, but got: %d", unchokeMessageId)
+    }
+
+    blockSize := 16 * 1024
+    totalBlocks := (pieceSize + blockSize - 1) / blockSize
+
+    var pieceData []byte
+    for i := 0; i < totalBlocks; i++ {
+        requestMessageId := byte(6)
+        begin := i * blockSize
+        length := blockSize
+        if i == totalBlocks-1 && pieceSize%blockSize != 0 {
+            length = pieceSize % blockSize
+        }
+
+        payload := make([]byte, 12)
+        binary.BigEndian.PutUint32(payload[0:4], uint32(pieceIndex))
+        binary.BigEndian.PutUint32(payload[4:8], uint32(begin))
+        binary.BigEndian.PutUint32(payload[8:12], uint32(length))
+
+        message := append([]byte{0, 0, 0, 13, requestMessageId}, payload...)
+
+        _, err = conn.Write(message)
+        if err != nil {
+            return nil, fmt.Errorf("error sending request message: %v", err)
+        }
+
+        responseBuffer := make([]byte, 4+1+8+length)
+        _, err = io.ReadFull(conn, responseBuffer)
+        if err != nil {
+            return nil, fmt.Errorf("error reading response message: %v", err)
+        }
+
+        responseMessageId := responseBuffer[4]
+        if responseMessageId != 7 {
+            return nil, fmt.Errorf("expected piece message ID 7, but got: %d", responseMessageId)
+        }
+
+        pieceData = append(pieceData, responseBuffer[13:]...)
+    }
+
+    return pieceData, nil
 }
 
 func doHandshake(fileName string, hostWithPort string) (string, net.Conn) {
